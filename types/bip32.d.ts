@@ -22,7 +22,7 @@ export interface BIP32Interface extends Signer {
     chainCode: Buffer;
     network: Network;
     depth: number;
-    index: number;
+    index: Buffer;
     parentFingerprint: number;
     privateKey?: Buffer;
     identifier: Buffer;
@@ -34,6 +34,7 @@ export interface BIP32Interface extends Signer {
     derive(index: number): BIP32Interface;
     deriveHardened(index: number): BIP32Interface;
     derivePath(path: string): BIP32Interface;
+    deriveExtended(index: Buffer, isHardened: boolean): BIP32Interface;
     tweak(t: Buffer): Signer;
 }
 export interface BIP32API {

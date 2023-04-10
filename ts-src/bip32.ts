@@ -33,7 +33,7 @@ export interface BIP32Interface extends Signer {
   chainCode: Buffer;
   network: Network;
   depth: number;
-  index: number;
+  index: Buffer;
   parentFingerprint: number;
   privateKey?: Buffer;
   identifier: Buffer;
@@ -45,6 +45,7 @@ export interface BIP32Interface extends Signer {
   derive(index: number): BIP32Interface;
   deriveHardened(index: number): BIP32Interface;
   derivePath(path: string): BIP32Interface;
+  deriveExtended(index: Buffer, isHardened: boolean): BIP32Interface;
   tweak(t: Buffer): Signer;
 }
 
@@ -197,7 +198,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
       public chainCode: Buffer,
       public network: Network,
       private __DEPTH = 0,
-      private __INDEX = 0,
+      private __INDEX: Buffer = Buffer.from([0x00, 0x00, 0x00, 0x00]),
       private __PARENT_FINGERPRINT = 0x00000000,
     ) {
       super(__D, __Q);
@@ -208,7 +209,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
       return this.__DEPTH;
     }
 
-    get index(): number {
+    get index(): Buffer {
       return this.__INDEX;
     }
 
@@ -263,7 +264,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
 
       // 4 bytes: child number. This is the number i in xi = xpar/i, with xi the key being serialized.
       // This is encoded in big endian. (0x00000000 if master key)
-      buffer.writeUInt32BE(this.index, 9);
+      this.index.copy(buffer, 9);
 
       // 32 bytes: the chain code
       this.chainCode.copy(buffer, 13);
@@ -293,32 +294,40 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
       typeforce(typeforce.UInt32, index);
 
       const isHardened = index >= HIGHEST_BIT;
-      const data = Buffer.allocUnsafe(37);
+      const indexBuffer = Buffer.alloc(4);
+      indexBuffer.writeUInt32BE(index);
+      return this.deriveExtended(indexBuffer, isHardened);
+    }
+
+    // https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#child-key-derivation-ckd-functions
+    deriveExtended(index: Buffer, isHardened: boolean): BIP32Interface {
+      const data = Buffer.allocUnsafe(1 + 32 + index.length);
 
       // Hardened child
       if (isHardened) {
         if (this.isNeutered())
           throw new TypeError('Missing private key for hardened child key');
 
-        // data = 0x00 || ser256(kpar) || ser32(index)
+        // data = 0x00 || ser256(kpar) || ser(index)
         data[0] = 0x00;
         this.privateKey!.copy(data, 1);
-        data.writeUInt32BE(index, 33);
+        index.copy(data, 33);
 
         // Normal child
       } else {
-        // data = serP(point(kpar)) || ser32(index)
-        //      = serP(Kpar) || ser32(index)
+        // data = serP(point(kpar)) || ser(index)
+        //      = serP(Kpar) || ser(index)
         this.publicKey.copy(data, 0);
-        data.writeUInt32BE(index, 33);
+        index.copy(data, 33);
       }
 
       const I = crypto.hmacSHA512(this.chainCode, data);
       const IL = I.slice(0, 32);
       const IR = I.slice(32);
 
+      const nextIndex = Buffer.from(index); // FIXME need increment
       // if parse256(IL) >= n, proceed with the next value for i
-      if (!ecc.isPrivate(IL)) return this.derive(index + 1);
+      if (!ecc.isPrivate(IL)) return this.deriveExtended(nextIndex, isHardened);
 
       // Private parent key -> private child key
       let hd: BIP32Interface;
@@ -327,7 +336,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
         const ki = Buffer.from(ecc.privateAdd(this.privateKey!, IL)!);
 
         // In case ki == 0, proceed with the next value for i
-        if (ki == null) return this.derive(index + 1);
+        if (ki == null) return this.deriveExtended(nextIndex, isHardened);
 
         hd = fromPrivateKeyLocal(
           ki,
@@ -345,7 +354,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
         const Ki = Buffer.from(ecc.pointAddScalar(this.publicKey, IL, true)!);
 
         // In case Ki is the point at infinity, proceed with the next value for i
-        if (Ki === null) return this.derive(index + 1);
+        if (Ki === null) return this.deriveExtended(nextIndex, isHardened);
 
         hd = fromPublicKeyLocal(
           Ki,
@@ -458,6 +467,9 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
     const index = buffer.readUInt32BE(9);
     if (depth === 0 && index !== 0) throw new TypeError('Invalid index');
 
+    const indexBuffer = Buffer.alloc(4);
+    indexBuffer.writeUInt32BE(index);
+
     // 32 bytes: the chain code
     const chainCode = buffer.slice(13, 45);
     let hd: BIP32Interface;
@@ -473,7 +485,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
         chainCode,
         network,
         depth,
-        index,
+        indexBuffer,
         parentFingerprint,
       );
 
@@ -486,7 +498,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
         chainCode,
         network,
         depth,
-        index,
+        indexBuffer,
         parentFingerprint,
       );
     }
@@ -507,7 +519,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
     chainCode: Buffer,
     network?: Network,
     depth?: number,
-    index?: number,
+    index?: Buffer | undefined,
     parentFingerprint?: number,
   ): BIP32Interface {
     typeforce(
@@ -545,7 +557,7 @@ export function BIP32Factory(ecc: TinySecp256k1Interface): BIP32API {
     chainCode: Buffer,
     network?: Network,
     depth?: number,
-    index?: number,
+    index?: Buffer,
     parentFingerprint?: number,
   ): BIP32Interface {
     typeforce(
