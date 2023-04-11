@@ -31,7 +31,7 @@ fixtures.valid.forEach((f) => {
 function verify (t, hd, prv, f, network) {
   t.equal(hd.chainCode.toString('hex'), f.chainCode)
   t.equal(hd.depth, f.depth >>> 0)
-  t.equal(hd.index, f.index >>> 0)
+  t.equal(hd.index.readUInt32BE(0), f.index >>> 0)
   t.equal(hd.compressed, true)
   t.equal(hd.fingerprint.toString('hex'), f.fingerprint)
   t.equal(hd.identifier.toString('hex'), f.identifier)
@@ -325,4 +325,22 @@ tape('tweak - neutered', (t) => {
   t.equal(signer.verifySchnorr(hash, schnorrsig), true)
   t.equal(signer.verifySchnorr(seed, schnorrsig), false)
 })
+
+    tape('extended BIP32 derivation', (t) => {
+
+        t.plan(6);
+        let mk = BIP32.fromBase58('xpub661MyMwAqRbcEYS8w7XLSVeEsBXy79zSzH1J8vCdxAZningWLdN3zgtU6RXQ8UucwhyEx5bTLKUc5BQJdMAGczDn9pYt5CBDeNcTi8ow1sR')
+
+        let child1 = mk.deriveExtended(Buffer.from([1,2,3,4,5]));
+        t.equal(child1.publicKey.toString('hex'), '026b299d834bbb242a961192ba5a1d5663b5fa8d76d88aff93fd2a6044a524ce70')
+        t.equal(child1.chainCode.toString('hex'), '5b37a4f4f656bbe83497232deab1be3a468535ca55c296f123ee8339d56100f5')
+
+        let child2 = mk.deriveExtended(Buffer.from([8,0,2,8,0,2]));
+        t.equal(child2.publicKey.toString('hex'), '03bbe7150acce76b3d155a840a5096e334cddc6a129bd3d481a200518efa066098')
+        t.equal(child2.chainCode.toString('hex'), '68db4ee9e71a592c463e70202b4d49f4408530a7e783c43625360956e6180052')
+
+        let child12 = child1.deriveExtended(Buffer.from([8,0,2,8,0,2]))
+        t.equal(child12.publicKey.toString('hex'), '02acd25bb5fbd517e5141aa5bc9b58554a96b9e9436bb285abb2090598cdcf850e')
+        t.equal(child12.chainCode.toString('hex'), '8e808ba4caebadca661fd647fcc8ab5e80a1b538b7ffee7bccf3f3a01a35d19e')
+    })
 })
